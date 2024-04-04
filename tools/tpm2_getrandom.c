@@ -15,6 +15,13 @@
 #include "tpm2_alg_util.h"
 #include "tpm2_util.h"
 
+#include "/home/wole/Documents/pcie-chip-20.2.4/pcie-chip-20.2.4-linux/Libs-Apps/Quantis/Quantis.h"
+#define BYTES_DEFAULT 10
+#define BYTES_MAX 100000
+
+
+
+
 typedef struct tpm_random_ctx tpm_random_ctx;
 #define MAX_AUX_SESSIONS 3
 #define MAX_SESSIONS 3
@@ -58,21 +65,36 @@ static tpm_random_ctx ctx = {
     .parameter_hash_algorithm = TPM2_ALG_ERROR,
 };
 
-static tool_rc get_random(ESYS_CONTEXT *ectx) {
+// static tool_rc get_random(ESYS_CONTEXT *ectx) {
 
-    /*
-     * 1. TPM2_CC_<command> OR Retrieve cpHash
-     */
-    tool_rc rc = tpm2_getrandom(ectx, ctx.num_of_bytes, &ctx.random_bytes,
-        &ctx.cp_hash, &ctx.rp_hash, ctx.aux_session_handle[0],
-        ctx.aux_session_handle[1], ctx.aux_session_handle[2],
-        ctx.parameter_hash_algorithm);
-    if (rc != tool_rc_success) {
-        LOG_ERR("Failed getrandom");
+//     /*
+//      * 1. TPM2_CC_<command> OR Retrieve cpHash
+//      */
+//     tool_rc rc = tpm2_getrandom(ectx, ctx.num_of_bytes, &ctx.random_bytes,
+//         &ctx.cp_hash, &ctx.rp_hash, ctx.aux_session_handle[0],
+//         ctx.aux_session_handle[1], ctx.aux_session_handle[2],
+//         ctx.parameter_hash_algorithm);
+//     if (rc != tool_rc_success) {
+//         LOG_ERR("Failed getrandom");
+//     }
+
+//     return rc;
+// }
+
+static ssize_t get_random_custom(ESYS_CONTEXT *ectx, uint8_t *buffer, size_t buffer_size) {
+    QuantisDeviceType deviceType = QUANTIS_DEVICE_PCI;
+    int cardNumber = 0;
+    ssize_t readBytes = -1;
+
+    // Generate random bytes
+    readBytes = QuantisRead(deviceType, cardNumber, buffer, buffer_size);
+    if (readBytes < 0) {
+        fprintf(stderr, "An error occurred when reading random bytes: %s\n", QuantisStrError(readBytes));
     }
 
-    return rc;
+    return readBytes;
 }
+
 
 static tool_rc process_outputs(void) {
 
@@ -336,8 +358,37 @@ static bool tpm2_tool_onstart(tpm2_options **opts) {
     return *opts != NULL;
 }
 
-static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
+// static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
 
+//     UNUSED(flags);
+
+//     /*
+//      * 1. Process options
+//      */
+
+//     /*
+//      * 2. Process inputs
+//      */
+//     tool_rc rc = process_inputs(ectx);
+//     if (rc != tool_rc_success) {
+//         return rc;
+//     }
+
+//     /*
+//      * 3. TPM2_CC_<command> call
+//      */
+//     rc = get_random(ectx);
+//     if (rc != tool_rc_success) {
+//         return rc;
+//     }
+
+//     /*
+//      * 4. Process outputs
+//      */
+//     return process_outputs();
+// }
+
+static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
     UNUSED(flags);
 
     /*
@@ -352,10 +403,17 @@ static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
         return rc;
     }
 
+    TPM2B_DIGEST randomBytes = { .size = 0 }; // Initialize buffer size to 0
+
+
+    // Allocate buffer for random data
+    randomBytes.size = ctx.num_of_bytes;
+    UINT8 buffer[ctx.num_of_bytes];
+
     /*
-     * 3. TPM2_CC_<command> call
+     * 3. Call get_random_custom instead of get_random
      */
-    rc = get_random(ectx);
+    rc = get_random_custom(ectx, &randomBytes, ctx.num_of_bytes); // Add appropriate arguments for custom_bytes and custom_size
     if (rc != tool_rc_success) {
         return rc;
     }
@@ -365,6 +423,7 @@ static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
      */
     return process_outputs();
 }
+
 
 static tool_rc tpm2_tool_onstop(ESYS_CONTEXT *ectx) {
 
