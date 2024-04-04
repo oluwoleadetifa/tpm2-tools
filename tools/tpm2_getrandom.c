@@ -81,19 +81,42 @@ static tpm_random_ctx ctx = {
 //     return rc;
 // }
 
-static ssize_t get_random_custom(ESYS_CONTEXT *ectx, uint8_t *buffer, size_t buffer_size) {
+static tool_rc get_random_custom(ESYS_CONTEXT *ectx) {
+    tool_rc rc = tool_rc_general_error;
     QuantisDeviceType deviceType = QUANTIS_DEVICE_PCI;
     int cardNumber = 0;
     ssize_t readBytes = -1;
+    uint8_t buffer[BYTES_MAX]; // Assuming BYTES_MAX is the maximum number of bytes you can read
 
-    // Generate random bytes
-    readBytes = QuantisRead(deviceType, cardNumber, buffer, buffer_size);
+    // Generate random bytes using Quantis
+    readBytes = QuantisRead(deviceType, cardNumber, buffer, sizeof(buffer));
     if (readBytes < 0) {
         fprintf(stderr, "An error occurred when reading random bytes: %s\n", QuantisStrError(readBytes));
+        goto cleanup;
     }
 
-    return readBytes;
+    // Use TPM2-TSS to get random bytes and cpHash
+    rc = tpm2_getrandom(ectx, readBytes, &ctx.random_bytes,
+            &ctx.cp_hash, &ctx.rp_hash, ctx.aux_session_handle[0],
+            ctx.aux_session_handle[1], ctx.aux_session_handle[2],
+            ctx.parameter_hash_algorithm);
+    if (rc != tool_rc_success) {
+        LOG_ERR("Failed getrandom");
+        goto cleanup;
+    }
+
+    // Replace the generated random bytes with custom bytes
+    memcpy(ctx.random_bytes->buffer, buffer, readBytes);
+
+    // Process the modified buffer (e.g., use it in your application)
+
+cleanup:
+    // Clean up resources here
+    // For example, close file handles, free memory, etc.
+
+    return rc;
 }
+
 
 
 static tool_rc process_outputs(void) {
@@ -389,6 +412,7 @@ static bool tpm2_tool_onstart(tpm2_options **opts) {
 // }
 
 static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
+
     UNUSED(flags);
 
     /*
@@ -403,17 +427,10 @@ static tool_rc tpm2_tool_onrun(ESYS_CONTEXT *ectx, tpm2_option_flags flags) {
         return rc;
     }
 
-    TPM2B_DIGEST randomBytes = { .size = 0 }; // Initialize buffer size to 0
-
-
-    // Allocate buffer for random data
-    randomBytes.size = ctx.num_of_bytes;
-    UINT8 buffer[ctx.num_of_bytes];
-
     /*
-     * 3. Call get_random_custom instead of get_random
+     * 3. TPM2_CC_<command> call
      */
-    rc = get_random_custom(ectx, &randomBytes, ctx.num_of_bytes); // Add appropriate arguments for custom_bytes and custom_size
+    rc = get_random_custom(ectx);
     if (rc != tool_rc_success) {
         return rc;
     }
